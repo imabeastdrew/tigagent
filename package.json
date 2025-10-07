@@ -10,17 +10,22 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@openai/agents": "^0.1.0",
+    "@openai/agents": "^0.1.9",
     "@openai/guardrails": "^0.1.0",
-    "openai": "^4.0.0",
+    "dotenv": "^16.3.0",
+    "openai": "^5.23.2",
     "pg": "^8.11.0",
-    "zod": "^3.22.0",
-    "dotenv": "^16.3.0"
+    "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/pg": "^8.10.0",
     "typescript": "^5.0.0"
+  },
+  "overrides": {
+    "@openai/guardrails": {
+      "openai": "^5.23.2"
+    }
   },
   "keywords": [
     "tig",

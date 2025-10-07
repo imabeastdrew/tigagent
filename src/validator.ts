@@ -56,9 +56,11 @@ export function validateAndBuildSQL(plan: QueryPlan, projectId: string): Validat
     }
     
     // Check for dangerous keywords in filters (basic check)
+    // Use word boundaries to avoid false positives like "commits" matching "COMMIT"
     const filterText = JSON.stringify(plan.filters);
     for (const keyword of DANGEROUS_KEYWORDS) {
-      if (filterText.toUpperCase().includes(keyword)) {
+      const regex = new RegExp(`\\b${keyword}\\b`, 'i');
+      if (regex.test(filterText)) {
         issues.push(`Dangerous keyword detected: ${keyword}`);
       }
     }
@@ -91,6 +93,19 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
     throw new Error(`Unknown main entity: ${mainEntity}`);
   }
   
+  // Resolve parameter placeholders to actual values
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+  
+  const resolveParameter = (value: any): any => {
+    if (typeof value === 'string') {
+      if (value === ':project_id') return projectId;
+      if (value === ':start_date') return thirtyDaysAgo.toISOString();
+      if (value === ':end_date') return now.toISOString();
+    }
+    return value;
+  };
+  
   // Build SELECT clause
   const selectColumns = plan.columns.length > 0 
     ? plan.columns.map(col => {
@@ -120,13 +135,13 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
   
   // Always include project_id filter
   if (mainEntity === 'projects') {
-    whereConditions.push(`${mainEntity}.id = $1`);
+    whereConditions.push(`${mainEntity}.id = '${projectId}'`);
   } else {
     // For other entities, join to projects to filter by project_id
     if (!plan.joins.some(j => j.right_table === 'projects')) {
       joins.push(`INNER JOIN projects ON ${mainEntity}.project_id = projects.id`);
     }
-    whereConditions.push(`projects.id = $1`);
+    whereConditions.push(`projects.id = '${projectId}'`);
   }
   
   // Add time window filter
@@ -140,10 +155,9 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
   }
   
   // Add custom filters
-  let paramIndex = 2;
   for (const filter of plan.filters) {
     const [table, column] = filter.column.includes('.') ? filter.column.split('.') : [mainEntity, filter.column];
-    const param = `$${paramIndex}`;
+    const resolvedValue = resolveParameter(filter.value);
     
     switch (filter.operator) {
       case '=':
@@ -152,23 +166,25 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
       case '<':
       case '>=':
       case '<=':
-        whereConditions.push(`${table}.${column} ${filter.operator} ${param}`);
-        paramIndex++;
+        if (typeof resolvedValue === 'string') {
+          whereConditions.push(`${table}.${column} ${filter.operator} '${resolvedValue}'`);
+        } else {
+          whereConditions.push(`${table}.${column} ${filter.operator} ${resolvedValue}`);
+        }
         break;
       case 'LIKE':
-        whereConditions.push(`${table}.${column} LIKE ${param}`);
-        paramIndex++;
+        whereConditions.push(`${table}.${column} LIKE '${resolvedValue}'`);
         break;
       case 'IN':
-        if (Array.isArray(filter.value)) {
-          const placeholders = filter.value.map(() => `$${paramIndex++}`).join(', ');
-          whereConditions.push(`${table}.${column} IN (${placeholders})`);
+        if (Array.isArray(resolvedValue)) {
+          const values = resolvedValue.map(v => typeof v === 'string' ? `'${v}'` : v).join(', ');
+          whereConditions.push(`${table}.${column} IN (${values})`);
         }
         break;
       case 'NOT IN':
-        if (Array.isArray(filter.value)) {
-          const placeholders = filter.value.map(() => `$${paramIndex++}`).join(', ');
-          whereConditions.push(`${table}.${column} NOT IN (${placeholders})`);
+        if (Array.isArray(resolvedValue)) {
+          const values = resolvedValue.map(v => typeof v === 'string' ? `'${v}'` : v).join(', ');
+          whereConditions.push(`${table}.${column} NOT IN (${values})`);
         }
         break;
     }

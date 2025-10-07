@@ -50,6 +50,20 @@ CLASSIFICATION RULES:
 
 Always respond with exactly one domain name.`,
   model: MODEL_CONFIG.routerModel,
-  outputType: DomainSchema as any,
+  outputType: {
+    type: "json_schema",
+    name: "domain_classification",
+    schema: {
+      type: "object",
+      properties: {
+        domain: {
+          type: "string",
+          enum: ["commit", "interaction", "conversation", "file", "project", "user", "other"]
+        }
+      },
+      required: ["domain"],
+      additionalProperties: false
+    }
+  } as any,
   modelSettings: MODEL_SETTINGS.minimal
 });

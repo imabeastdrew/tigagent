@@ -26,7 +26,7 @@ export const QueryPlanSchema = z.object({
     column: z.string(),
     operator: z.enum(["=", "!=", ">", "<", ">=", "<=", "LIKE", "IN", "NOT IN"]),
     value: z.union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))]),
-    description: z.string().optional()
+    description: z.string().nullable()
   })).describe("Filter conditions to apply"),
   joins: z.array(z.object({
     left_table: z.string(),
@@ -36,8 +36,8 @@ export const QueryPlanSchema = z.object({
     type: z.enum(["INNER", "LEFT", "RIGHT", "FULL"]).default("INNER")
   })).describe("Table joins required"),
   time_window: z.object({
-    start_date: z.string().optional(),
-    end_date: z.string().optional(),
+    start_date: z.string().nullable(),
+    end_date: z.string().nullable(),
     days_back: z.number().default(30)
   }).describe("Time range for the query"),
   project_scope: z.string().describe("Project ID to scope the query to"),

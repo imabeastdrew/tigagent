@@ -1,8 +1,5 @@
-import { runGuardrails } from "@openai/guardrails";
 import { Runner, AgentInputItem } from "@openai/agents";
 import { WorkflowInput, Domain, QueryPlan, ExecutionResult } from "./types.js";
-import { client, guardrailsConfig, guardrailsContext } from "./config.js";
-import { guardrailsHasTripwire, getGuardrailSafeText, buildGuardrailFailOutput } from "./guardrailUtils.js";
 import { routerAgent } from "./agents/routerAgent.js";
 import { 
   commitPlannerAgent, 
@@ -20,13 +17,11 @@ import { Pool } from "pg";
  * Main workflow orchestrator for the Tig Agent SDK
  * 
  * Executes the full pipeline:
- * 1. Input guardrails
- * 2. Domain routing
- * 3. Query planning
- * 4. SQL validation
- * 5. Query execution
- * 6. Answer synthesis
- * 7. Output guardrails
+ * 1. Domain routing
+ * 2. Query planning
+ * 3. SQL validation
+ * 4. Query execution
+ * 5. Answer synthesis
  */
 export async function runWorkflow(
   workflow: WorkflowInput, 
@@ -35,12 +30,7 @@ export async function runWorkflow(
   const conversationHistory: AgentInputItem[] = [
     {
       role: "user",
-      content: [
-        {
-          type: "input_text",
-          text: workflow.input_as_text
-        }
-      ]
+      content: workflow.input_as_text
     }
   ];
 
@@ -53,23 +43,7 @@ export async function runWorkflow(
   });
 
   try {
-    // Step 1: Input Guardrails
-    console.log("Running input guardrails...");
-    const guardrailsResult = await runGuardrails(
-      workflow.input_as_text, 
-      guardrailsConfig, 
-      guardrailsContext
-    );
-    
-    const guardrailsHastripwire = guardrailsHasTripwire(guardrailsResult);
-    const guardrailsAnonymizedtext = getGuardrailSafeText(guardrailsResult, workflow.input_as_text);
-    
-    if (guardrailsHastripwire) {
-      console.log("Input blocked by guardrails");
-      return JSON.stringify(buildGuardrailFailOutput(guardrailsResult ?? []));
-    }
-
-    // Step 2: Domain Routing
+    // Step 1: Domain Routing
     console.log("Routing domain...");
     const routerResult = await runner.run(routerAgent, [...conversationHistory]);
     conversationHistory.push(...routerResult.newItems.map((item) => item.rawItem));
@@ -78,10 +52,11 @@ export async function runWorkflow(
       throw new Error("Router agent result is undefined");
     }
 
-    const domain = routerResult.finalOutput as Domain;
+    const domainResult = routerResult.finalOutput as { domain: Domain };
+    const domain = domainResult.domain;
     console.log(`Routed to domain: ${domain}`);
 
-    // Step 3: Query Planning
+    // Step 2: Query Planning
     console.log("Planning query...");
     let plannerAgent;
     
@@ -117,7 +92,7 @@ export async function runWorkflow(
     const queryPlan = plannerResult.finalOutput as QueryPlan;
     console.log(`Query plan created: ${queryPlan.intent_summary}`);
 
-    // Step 4: SQL Validation
+    // Step 3: SQL Validation
     console.log("Validating and building SQL...");
     const validationResult = validateAndBuildSQL(queryPlan, workflow.project_id);
     
@@ -129,28 +104,23 @@ export async function runWorkflow(
     const safeSQL = validationResult.safeSQL!;
     console.log(`Generated safe SQL: ${safeSQL.substring(0, 100)}...`);
 
-    // Step 5: Query Execution
+    // Step 4: Query Execution
     console.log("Executing query...");
     const executionResult = await executeQueryWithParams(
       safeSQL, 
-      [workflow.project_id], // First parameter is always project_id
+      [], // No parameters needed since SQL is fully resolved
       pool
     );
     
     console.log(`Query executed: ${executionResult.rowCount} rows in ${executionResult.executionTimeMs}ms`);
 
-    // Step 6: Answer Synthesis
+    // Step 5: Answer Synthesis
     console.log("Synthesizing answer...");
     const synthesisInput = [
       ...conversationHistory,
       {
-        role: "assistant",
-        content: [
-          {
-            type: "input_text",
-            text: `Query Results (${executionResult.rowCount} rows):\n${JSON.stringify(executionResult.rows, null, 2)}`
-          }
-        ]
+        role: "user",
+        content: `Query Results (${executionResult.rowCount} rows):\n${JSON.stringify(executionResult.rows, null, 2)}`
       }
     ];
 
@@ -162,26 +132,9 @@ export async function runWorkflow(
     }
 
     const synthesizedAnswer = synthesisResult.finalOutput as string;
-
-    // Step 7: Output Guardrails
-    console.log("Running output guardrails...");
-    const outputGuardrailsResult = await runGuardrails(
-      synthesizedAnswer,
-      guardrailsConfig,
-      guardrailsContext
-    );
-
-    const outputGuardrailsHastripwire = guardrailsHasTripwire(outputGuardrailsResult);
-    
-    if (outputGuardrailsHastripwire) {
-      console.log("Output blocked by guardrails");
-      return JSON.stringify(buildGuardrailFailOutput(outputGuardrailsResult ?? []));
-    }
-
-    const finalAnswer = getGuardrailSafeText(outputGuardrailsResult, synthesizedAnswer);
     
     console.log("Workflow completed successfully");
-    return finalAnswer;
+    return synthesizedAnswer;
 
   } catch (error) {
     console.error("Workflow error:", error);

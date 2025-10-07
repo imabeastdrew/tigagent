@@ -50,9 +50,9 @@ export const guardrailsContext = {
  * Model configuration for different agents
  */
 export const MODEL_CONFIG = {
-  routerModel: "gpt-4o-mini",
-  plannerModel: "gpt-4o", 
-  synthesizerModel: "gpt-4o",
+  routerModel: "gpt-5",
+  plannerModel: "gpt-5", 
+  synthesizerModel: "gpt-5",
   guardrailModel: "gpt-4o-mini"
 };
 
