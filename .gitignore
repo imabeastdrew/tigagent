@@ -1,0 +1,6 @@
+.env
+node_modules/
+dist/
+.cursorrules
+plan.md
+schema.md
