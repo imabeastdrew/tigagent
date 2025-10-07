@@ -52,9 +52,12 @@ export async function runWorkflow(
       throw new Error("Router agent result is undefined");
     }
 
-    const domainResult = routerResult.finalOutput as { domain: Domain };
+    const domainResult = routerResult.finalOutput as { domain: Domain; is_cross_domain?: boolean; domains?: string[] };
     const domain = domainResult.domain;
-    console.log(`Routed to domain: ${domain}`);
+    const isCrossDomain = domainResult.is_cross_domain || false;
+    const allDomains = domainResult.domains || [domain];
+    
+    console.log(`Routed to domain: ${domain}${isCrossDomain ? ` (cross-domain: ${allDomains.join(', ')})` : ''}`);
 
     // Step 2: Query Planning
     console.log("Planning query...");

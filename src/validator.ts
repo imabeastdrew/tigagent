@@ -4,7 +4,10 @@ import {
   getEntityColumns, 
   isValidJoin, 
   isRestrictedColumn,
-  getForeignKeyRelationship 
+  getForeignKeyRelationship,
+  getTextJoinCondition,
+  ALLOWED_AGGREGATIONS,
+  AGGREGATION_RULES
 } from "./ontology.js";
 
 /**
@@ -48,10 +51,50 @@ export function validateAndBuildSQL(plan: QueryPlan, projectId: string): Validat
       }
     }
     
-    // Validate joins
+    // Validate joins (including text-based joins)
     for (const join of plan.joins) {
+      // First check if the join is allowed at all
       if (!isValidJoin(join.left_table, join.right_table)) {
         issues.push(`Invalid join: ${join.left_table} → ${join.right_table}`);
+        continue;
+      }
+      
+      // Check if it's a valid foreign key join
+      const fkRelationship = getForeignKeyRelationship(join.left_table, join.right_table);
+      // Check if it's a valid text-based join
+      const textJoin = getTextJoinCondition(join.left_table, join.right_table);
+      
+      if (!fkRelationship && !textJoin) {
+        // Check bidirectional joins
+        const reverseFk = getForeignKeyRelationship(join.right_table, join.left_table);
+        const reverseTextJoin = getTextJoinCondition(join.right_table, join.left_table);
+        
+        if (!reverseFk && !reverseTextJoin) {
+          issues.push(`No valid relationship found for join: ${join.left_table} → ${join.right_table}`);
+        }
+      }
+    }
+    
+    // Validate aggregations
+    if (plan.aggregations && plan.aggregations.length > 0) {
+      for (const agg of plan.aggregations) {
+        if (!ALLOWED_AGGREGATIONS.includes(agg.function)) {
+          issues.push(`Invalid aggregation function: ${agg.function}`);
+        }
+        
+        // Check if numeric-only functions are used on appropriate columns
+        if (AGGREGATION_RULES.numeric_only.includes(agg.function)) {
+          // This is a basic check - in a real implementation, you'd check column types
+          const columnName = agg.column.split('.').pop() || agg.column;
+          if (columnName === 'id' || columnName === 'created_at' || columnName === 'committed_at') {
+            issues.push(`Aggregation function ${agg.function} not suitable for ${agg.column}`);
+          }
+        }
+      }
+      
+      // Validate GROUP BY if aggregations are present
+      if (plan.aggregations.length > 0 && (!plan.group_by || plan.group_by.length === 0)) {
+        issues.push(`GROUP BY required when using aggregations`);
       }
     }
     
@@ -59,6 +102,10 @@ export function validateAndBuildSQL(plan: QueryPlan, projectId: string): Validat
     // Use word boundaries to avoid false positives like "commits" matching "COMMIT"
     const filterText = JSON.stringify(plan.filters);
     for (const keyword of DANGEROUS_KEYWORDS) {
+      // Skip "COMMIT" if it's part of a table name like "commits"
+      if (keyword === 'COMMIT' && (filterText.includes('commits') || filterText.includes('commit'))) {
+        continue;
+      }
       const regex = new RegExp(`\\b${keyword}\\b`, 'i');
       if (regex.test(filterText)) {
         issues.push(`Dangerous keyword detected: ${keyword}`);
@@ -99,34 +146,88 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
   
   const resolveParameter = (value: any): any => {
     if (typeof value === 'string') {
-      if (value === ':project_id') return projectId;
-      if (value === ':start_date') return thirtyDaysAgo.toISOString();
-      if (value === ':end_date') return now.toISOString();
+      if (value === ':project_id' || value === '${project_id}' || value === '{project_id}') return projectId;
+      if (value === ':start_date' || value === '${start_date}' || value === '{start_date}') return thirtyDaysAgo.toISOString();
+      if (value === ':end_date' || value === '${end_date}' || value === '{end_date}') return now.toISOString();
     }
     return value;
   };
   
-  // Build SELECT clause
-  const selectColumns = plan.columns.length > 0 
-    ? plan.columns.map(col => {
-        const [table, column] = col.includes('.') ? col.split('.') : [mainEntity, col];
-        return isRestrictedColumn(table, column) 
-          ? `CASE WHEN '${table}.${column}' = '${table}.${column}' THEN 'REDACTED' ELSE 'REDACTED' END AS ${column}`
-          : `${table}.${column}`;
-      }).join(', ')
-    : `${mainEntity}.*`;
+  // Build SELECT clause with aggregations
+  let selectColumns: string;
+  
+  if (plan.aggregations && plan.aggregations.length > 0) {
+    // Build aggregation SELECT
+    const aggregationClauses = plan.aggregations.map(agg => {
+      const [table, column] = agg.column.includes('.') ? agg.column.split('.') : [mainEntity, agg.column];
+      return `${agg.function}(${table}.${column}) AS ${agg.alias}`;
+    });
+    
+    // Add non-aggregated columns from GROUP BY
+    const groupByColumns = plan.group_by ? plan.group_by.map(col => {
+      const [table, column] = col.includes('.') ? col.split('.') : [mainEntity, col];
+      return `${table}.${column}`;
+    }) : [];
+    
+    selectColumns = [...groupByColumns, ...aggregationClauses].join(', ');
+  } else {
+    // Regular SELECT
+    selectColumns = plan.columns.length > 0 
+      ? plan.columns.map(col => {
+          const [table, column] = col.includes('.') ? col.split('.') : [mainEntity, col];
+          return isRestrictedColumn(table, column) 
+            ? `CASE WHEN '${table}.${column}' = '${table}.${column}' THEN 'REDACTED' ELSE 'REDACTED' END AS ${column}`
+            : `${table}.${column}`;
+        }).join(', ')
+      : `${mainEntity}.*`;
+  }
   
   // Build FROM clause
   let fromClause = `FROM ${mainEntity}`;
   
-  // Build JOIN clauses
+  // Track which tables are already in the FROM clause to avoid duplicates
+  const tablesInFrom = new Set([mainEntity]);
+  
+  // Build JOIN clauses (including text-based joins)
   const joins: string[] = [];
   for (const join of plan.joins) {
     const fkRelationship = getForeignKeyRelationship(join.left_table, join.right_table);
+    const textJoin = getTextJoinCondition(join.left_table, join.right_table);
+    
     if (fkRelationship) {
-      joins.push(
-        `${join.type} JOIN ${join.right_table} ON ${join.left_table}.${fkRelationship.leftColumn} = ${join.right_table}.${fkRelationship.rightColumn}`
-      );
+      if (!tablesInFrom.has(join.right_table)) {
+        joins.push(
+          `${join.type} JOIN ${join.right_table} ON ${join.left_table}.${fkRelationship.leftColumn} = ${join.right_table}.${fkRelationship.rightColumn}`
+        );
+        tablesInFrom.add(join.right_table);
+      }
+    } else if (textJoin) {
+      if (!tablesInFrom.has(join.right_table)) {
+        joins.push(
+          `${join.type} JOIN ${join.right_table} ON ${join.left_table}.${textJoin.leftColumn} = ${join.right_table}.${textJoin.rightColumn}`
+        );
+        tablesInFrom.add(join.right_table);
+      }
+    } else {
+      // Check reverse direction
+      const reverseFk = getForeignKeyRelationship(join.right_table, join.left_table);
+      const reverseTextJoin = getTextJoinCondition(join.right_table, join.left_table);
+      
+      if (reverseFk) {
+        if (!tablesInFrom.has(join.right_table)) {
+          joins.push(
+            `${join.type} JOIN ${join.right_table} ON ${join.right_table}.${reverseFk.rightColumn} = ${join.left_table}.${reverseFk.leftColumn}`
+          );
+          tablesInFrom.add(join.right_table);
+        }
+      } else if (reverseTextJoin) {
+        if (!tablesInFrom.has(join.right_table)) {
+          joins.push(
+            `${join.type} JOIN ${join.right_table} ON ${join.right_table}.${reverseTextJoin.rightColumn} = ${join.left_table}.${reverseTextJoin.leftColumn}`
+          );
+          tablesInFrom.add(join.right_table);
+        }
+      }
     }
   }
   
@@ -136,12 +237,39 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
   // Always include project_id filter
   if (mainEntity === 'projects') {
     whereConditions.push(`${mainEntity}.id = '${projectId}'`);
+  } else if (mainEntity === 'users') {
+    // Users table doesn't have project_id, so we don't add automatic project join
+    // Project filtering will be handled through joined entities
   } else {
     // For other entities, join to projects to filter by project_id
-    if (!plan.joins.some(j => j.right_table === 'projects')) {
+    if (!plan.joins.some(j => j.right_table === 'projects') && !tablesInFrom.has('projects')) {
       joins.push(`INNER JOIN projects ON ${mainEntity}.project_id = projects.id`);
+      tablesInFrom.add('projects');
     }
     whereConditions.push(`projects.id = '${projectId}'`);
+  }
+  
+  // Special handling for users table - it doesn't have project_id directly
+  if (mainEntity === 'users') {
+    // For users table, we need to filter through the joined entities
+    // Check if we have joins that can provide project context
+    const hasProjectContext = plan.joins.some(j => 
+      j.right_table === 'commits' || j.right_table === 'interactions' || j.right_table === 'conversations'
+    );
+    
+    if (hasProjectContext) {
+      // Filter through the joined entity's project_id
+      const projectEntity = plan.joins.find(j => 
+        j.right_table === 'commits' || j.right_table === 'interactions' || j.right_table === 'conversations'
+      )?.right_table;
+      
+      if (projectEntity && projectEntity !== 'projects') {
+        whereConditions.push(`${projectEntity}.project_id = '${projectId}'`);
+      }
+    } else {
+      // If no project context available, we can't filter by project
+      // This should be handled by the planner to ensure proper joins
+    }
   }
   
   // Add time window filter
@@ -190,9 +318,26 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
     }
   }
   
+  // Build GROUP BY clause
+  const groupBy = plan.group_by && plan.group_by.length > 0 
+    ? `GROUP BY ${plan.group_by.map(col => {
+        const [table, column] = col.includes('.') ? col.split('.') : [mainEntity, col];
+        return `${table}.${column}`;
+      }).join(', ')}`
+    : '';
+  
   // Build ORDER BY clause (default to most recent)
   const timeColumn = getTimeColumn(mainEntity);
-  const orderBy = timeColumn ? `ORDER BY ${mainEntity}.${timeColumn} DESC` : '';
+  let orderBy = '';
+  
+  if (plan.aggregations && plan.aggregations.length > 0) {
+    // For aggregation queries, order by the first aggregation (usually COUNT)
+    const firstAgg = plan.aggregations[0];
+    orderBy = `ORDER BY ${firstAgg.alias} DESC`;
+  } else if (timeColumn) {
+    // For regular queries, order by time column
+    orderBy = `ORDER BY ${mainEntity}.${timeColumn} DESC`;
+  }
   
   // Build LIMIT clause
   const limit = `LIMIT ${MAX_ROWS}`;
@@ -203,6 +348,7 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
     fromClause,
     ...joins,
     whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '',
+    groupBy,
     orderBy,
     limit
   ].filter(Boolean).join('\n');

@@ -35,12 +35,20 @@ export const QueryPlanSchema = z.object({
     right_column: z.string(),
     type: z.enum(["INNER", "LEFT", "RIGHT", "FULL"]).default("INNER")
   })).describe("Table joins required"),
+  aggregations: z.array(z.object({
+    function: z.enum(["COUNT", "MAX", "MIN", "AVG", "SUM"]),
+    column: z.string(),
+    alias: z.string()
+  })).nullable().describe("Aggregation functions to apply"),
+  group_by: z.array(z.string()).nullable().describe("Columns to group results by"),
   time_window: z.object({
     start_date: z.string().nullable(),
     end_date: z.string().nullable(),
     days_back: z.number().default(30)
   }).describe("Time range for the query"),
   project_scope: z.string().describe("Project ID to scope the query to"),
+  is_cross_domain: z.boolean().default(false).describe("Whether this query spans multiple domains"),
+  domains: z.array(z.string()).nullable().describe("List of domains involved in cross-domain queries"),
   explanation: z.string().describe("Reasoning for the query plan choices")
 });
 
