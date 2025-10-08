@@ -97,6 +97,45 @@ export const ENTITY_DEFINITIONS = {
     foreign_keys: {
       auth_user_id: "auth.users.id"
     }
+  },
+  
+  interaction_diffs: {
+    table: "interaction_diffs",
+    columns: {
+      id: "uuid",
+      interaction_id: "uuid",
+      file_path: "text",
+      diff_chunks: "jsonb",
+      created_at: "timestamp with time zone"
+    },
+    primary_key: "id",
+    foreign_keys: {
+      interaction_id: "interactions.id"
+    }
+  },
+  
+  pull_requests: {
+    table: "pull_requests",
+    columns: {
+      id: "uuid",
+      project_id: "uuid",
+      pr_number: "integer",
+      title: "text",
+      description: "text",
+      author: "text",
+      head_branch: "text",
+      base_branch: "text",
+      head_sha: "text",
+      state: "text",
+      github_url: "text",
+      created_at: "timestamp with time zone",
+      updated_at: "timestamp with time zone",
+      merged_at: "timestamp with time zone"
+    },
+    primary_key: "id",
+    foreign_keys: {
+      project_id: "projects.id"
+    }
   }
 };
 
@@ -113,10 +152,12 @@ export const RESTRICTED_COLUMNS = [
  */
 export const ALLOWED_JOINS = {
   "commits": ["projects"],
-  "interactions": ["conversations", "projects"],
+  "interactions": ["conversations", "projects", "interaction_diffs"],
   "conversations": ["projects", "interactions"],
-  "projects": ["commits", "conversations", "interactions"],
-  "users": ["commits", "interactions"]
+  "projects": ["commits", "conversations", "interactions", "pull_requests"],
+  "users": ["commits", "interactions"],
+  "interaction_diffs": ["interactions"],
+  "pull_requests": ["projects"]
 };
 
 /**
@@ -238,12 +279,16 @@ ENTITIES:
 - conversations: id, composer_id, title, created_at, project_id, platform
 - projects: id, created_at, github_repo_id, repo_owner, repo_name
 - users: id, auth_user_id, github_id, github_username, full_name, email, company, created_at, updated_at, onboarding_completed, chats_saved, show_tool_bubbles_beta
+- interaction_diffs: id, interaction_id, file_path, diff_chunks, created_at
+- pull_requests: id, project_id, pr_number, title, description, author, head_branch, base_branch, head_sha, state, github_url, created_at, updated_at, merged_at
 
 RELATIONSHIPS:
 - commits.project_id → projects.id
 - interactions.conversation_id → conversations.id  
 - conversations.project_id → projects.id
 - users.auth_user_id → auth.users.id
+- interaction_diffs.interaction_id → interactions.id
+- pull_requests.project_id → projects.id
 
 CROSS-DOMAIN RELATIONSHIPS:
 - users.github_username = commits.author (text-based join)
@@ -269,7 +314,7 @@ RESTRICTED COLUMNS (must be redacted):
 
 SAFETY RULES:
 - All queries must include project_id filter
-- Default time window is 30 days if not specified
+- Default to current state (HEAD) without time restrictions unless historical data is requested
 - Maximum 200 rows per query
 - Maximum 3 table joins per query
 - No mutations allowed (SELECT only)

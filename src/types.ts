@@ -55,6 +55,84 @@ export const QueryPlanSchema = z.object({
 export type QueryPlan = z.infer<typeof QueryPlanSchema>;
 
 /**
+ * Context analysis for multi-stage queries
+ */
+export const ContextAnalysisSchema = z.object({
+  primaryIntent: z.object({
+    domain: z.string().describe("Primary domain for the main query"),
+    query: z.string().describe("Description of the primary query intent"),
+    entities: z.array(z.string()).describe("Main entities involved in the primary query")
+  }),
+  contextualIntents: z.array(z.object({
+    domain: z.string().describe("Domain for this contextual query"),
+    query: z.string().describe("Description of the contextual query intent"),
+    connectionType: z.enum(['temporal', 'semantic', 'commit', 'file', 'author']).describe("How this relates to the primary query"),
+    entities: z.array(z.string()).describe("Entities involved in this contextual query"),
+    priority: z.number().min(1).max(3).describe("Priority level: 1=high, 2=medium, 3=low")
+  })).describe("Additional contextual queries that would provide relevant information"),
+  connectionStrategy: z.object({
+    type: z.enum(['time_based', 'commit_based', 'semantic', 'file_based', 'author_based']).describe("Primary strategy for connecting results"),
+    parameters: z.object({}).describe("Parameters for the connection strategy")
+  }),
+  explanation: z.string().describe("Reasoning for the context analysis")
+});
+
+export type ContextAnalysis = z.infer<typeof ContextAnalysisSchema>;
+
+/**
+ * Multi-stage query plan
+ */
+// Simplified query plan schema for multi-stage planning (without descriptions/defaults that cause API issues)
+const SimpleQueryPlanSchema = z.object({
+  intent_summary: z.string(),
+  entities: z.array(z.string()),
+  columns: z.array(z.string()),
+  filters: z.array(z.object({
+    column: z.string(),
+    operator: z.enum(["=", "!=", ">", "<", ">=", "<=", "LIKE", "IN", "NOT IN"]),
+    value: z.union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))]),
+    description: z.string().nullable()
+  })),
+  joins: z.array(z.object({
+    left_table: z.string(),
+    right_table: z.string(),
+    left_column: z.string(),
+    right_column: z.string(),
+    type: z.enum(["INNER", "LEFT", "RIGHT", "FULL"])
+  })),
+  aggregations: z.array(z.object({
+    function: z.enum(["COUNT", "MAX", "MIN", "AVG", "SUM"]),
+    column: z.string(),
+    alias: z.string()
+  })).nullable(),
+  group_by: z.array(z.string()).nullable(),
+  time_window: z.object({
+    start_date: z.string().nullable(),
+    end_date: z.string().nullable(),
+    days_back: z.number()
+  }),
+  project_scope: z.string(),
+  is_cross_domain: z.boolean(),
+  domains: z.array(z.string()).nullable(),
+  explanation: z.string()
+});
+
+export const MultiStageQueryPlanSchema = z.object({
+  primaryPlan: SimpleQueryPlanSchema,
+  contextualPlans: z.array(SimpleQueryPlanSchema),
+  connectionPlan: SimpleQueryPlanSchema.nullable(),
+  synthesisStrategy: z.object({
+    combineResults: z.boolean(),
+    highlightConnections: z.boolean(),
+    temporalOrdering: z.boolean(),
+    showContextualData: z.boolean()
+  }),
+  explanation: z.string()
+});
+
+export type MultiStageQueryPlan = z.infer<typeof MultiStageQueryPlanSchema>;
+
+/**
  * Result of SQL validation and generation
  */
 export interface ValidationResult {

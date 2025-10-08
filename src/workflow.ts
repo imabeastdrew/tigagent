@@ -1,16 +1,21 @@
 import { Runner, AgentInputItem } from "@openai/agents";
-import { WorkflowInput, Domain, QueryPlan, ExecutionResult } from "./types.js";
+import { WorkflowInput, Domain, QueryPlan, ExecutionResult, ContextAnalysis, MultiStageQueryPlan } from "./types.js";
 import { routerAgent } from "./agents/routerAgent.js";
 import { 
   commitPlannerAgent, 
   interactionPlannerAgent, 
   conversationPlannerAgent, 
   projectPlannerAgent, 
-  userPlannerAgent 
+  userPlannerAgent,
+  filePlannerAgent
 } from "./agents/plannerAgents.js";
 import { synthesizerAgent } from "./agents/synthesizerAgent.js";
+import { contextAnalyzer } from "./agents/contextAnalyzer.js";
+import { multiStagePlanner } from "./agents/multiStagePlanner.js";
+import { contextualSynthesizer } from "./agents/contextualSynthesizer.js";
 import { validateAndBuildSQL } from "./validator.js";
 import { executeQueryWithParams } from "./executor.js";
+import { executeMultiStageQueries } from "./parallelExecutor.js";
 import { Pool } from "pg";
 
 /**
@@ -73,6 +78,9 @@ export async function runWorkflow(
       case "conversation":
         plannerAgent = conversationPlannerAgent;
         break;
+      case "file":
+        plannerAgent = filePlannerAgent;
+        break;
       case "project":
         plannerAgent = projectPlannerAgent;
         break;
@@ -80,7 +88,7 @@ export async function runWorkflow(
         plannerAgent = userPlannerAgent;
         break;
       case "other":
-        return "I'm not sure how to help with that type of query. Could you try asking about commits, interactions, conversations, projects, or users?";
+        return "I'm not sure how to help with that type of query. Could you try asking about commits, interactions, conversations, files, projects, or users?";
       default:
         throw new Error(`Unknown domain: ${domain}`);
     }
@@ -142,5 +150,114 @@ export async function runWorkflow(
   } catch (error) {
     console.error("Workflow error:", error);
     return `I encountered an error while processing your request: ${error instanceof Error ? error.message : 'Unknown error'}`;
+  }
+}
+
+/**
+ * Enhanced contextual workflow that provides rich, cross-domain context
+ * 
+ * Executes the full pipeline with context analysis and multi-stage queries:
+ * 1. Context Analysis - identifies primary intent and related contexts
+ * 2. Multi-Stage Planning - creates coordinated query plans
+ * 3. Parallel Execution - executes multiple queries simultaneously
+ * 4. Contextual Synthesis - combines results with rich context
+ */
+export async function runContextualWorkflow(
+  workflow: WorkflowInput, 
+  pool: Pool
+): Promise<string> {
+  const runner = new Runner();
+  const conversationHistory: AgentInputItem[] = [
+    {
+      role: "user",
+      content: workflow.input_as_text
+    }
+  ];
+
+  try {
+    // Step 1: Context Analysis
+    console.log("Analyzing context...");
+    const contextResult = await runner.run(contextAnalyzer, [...conversationHistory]);
+    conversationHistory.push(...contextResult.newItems.map((item) => item.rawItem));
+
+    if (!contextResult.finalOutput) {
+      throw new Error("Context analyzer result is undefined");
+    }
+
+    const contextAnalysis = contextResult.finalOutput as ContextAnalysis;
+    console.log(`Context analysis: Primary=${contextAnalysis.primaryIntent.domain}, Contextual=${contextAnalysis.contextualIntents.length} intents`);
+
+    // Step 2: Multi-Stage Planning
+    console.log("Planning multi-stage queries...");
+    const planningResult = await runner.run(multiStagePlanner, [...conversationHistory]);
+    conversationHistory.push(...planningResult.newItems.map((item) => item.rawItem));
+
+    if (!planningResult.finalOutput) {
+      throw new Error("Multi-stage planner result is undefined");
+    }
+
+    const multiStagePlan = planningResult.finalOutput as MultiStageQueryPlan;
+    console.log(`Multi-stage plan: Primary + ${multiStagePlan.contextualPlans.length} contextual queries`);
+
+    // Step 3: Parallel Execution
+    console.log("Executing parallel queries...");
+    const executionResult = await executeMultiStageQueries(
+      multiStagePlan,
+      workflow.project_id,
+      pool
+    );
+
+    if (!executionResult.success) {
+      console.error("Query execution errors:", executionResult.errors);
+      return `I encountered errors while processing your request: ${executionResult.errors.join(', ')}`;
+    }
+
+    console.log(`Parallel execution completed: ${executionResult.totalExecutionTimeMs}ms`);
+    console.log(`Primary result rows: ${executionResult.primaryResult.result.rowCount}`);
+    console.log(`Contextual results: ${executionResult.contextualResults.length} queries`);
+    executionResult.contextualResults.forEach((result, index) => {
+      console.log(`  Contextual ${index + 1}: ${result.result.rowCount} rows`);
+    });
+
+    // Step 4: Contextual Synthesis
+    console.log("Synthesizing contextual results...");
+    
+    // Prepare execution results for synthesis
+    const executionData = {
+      contextAnalysis,
+      multiStagePlan,
+      executionResult: {
+        primaryResult: executionResult.primaryResult,
+        contextualResults: executionResult.contextualResults,
+        connectionResult: executionResult.connectionResult,
+        totalExecutionTimeMs: executionResult.totalExecutionTimeMs
+      }
+    };
+    
+    // Add execution results to conversation history for synthesis
+    const synthesisInput = [
+      ...conversationHistory,
+      {
+        role: "user",
+        content: `EXECUTION RESULTS: Primary query found ${executionResult.primaryResult.result.rowCount} rows. Contextual queries found: ${executionResult.contextualResults.map(r => r.result.rowCount).join(', ')} rows. Total execution time: ${executionResult.totalExecutionTimeMs}ms.
+
+PRIMARY DATA: ${JSON.stringify(executionResult.primaryResult.result.data, null, 2)}
+
+CONTEXTUAL DATA: ${executionResult.contextualResults.map((result, index) => `Contextual ${index + 1}: ${JSON.stringify(result.result.data, null, 2)}`).join('\n\n')}`
+      }
+    ];
+    
+    const synthesisResult = await runner.run(contextualSynthesizer, synthesisInput as any);
+
+    if (!synthesisResult.finalOutput) {
+      throw new Error("Contextual synthesizer result is undefined");
+    }
+
+    console.log("Contextual workflow completed successfully");
+    return synthesisResult.finalOutput as string;
+
+  } catch (error) {
+    console.error("Contextual workflow error:", error);
+    return `I encountered an error while processing your request: ${error instanceof Error ? error.message : String(error)}`;
   }
 }

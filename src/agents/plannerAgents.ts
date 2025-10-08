@@ -42,18 +42,18 @@ QUERY PLANNING STEPS:
 5. Specify joins if needed (commits → projects, commits → users via author)
 6. Add aggregations if needed (COUNT, MAX, MIN, AVG, SUM)
 7. Add GROUP BY if aggregating
-8. Set appropriate time window (default 30 days if not specified)
+8. Set appropriate time window (default to current state/HEAD if not specified, only add time window for historical queries)
 9. Set is_cross_domain=true if involving multiple domains
 10. Explain your reasoning
 
 EXAMPLE QUERIES:
-- "Show me recent commits" → entities: [commits], filters: [committed_at >= 30 days ago]
+- "Show me recent commits" → entities: [commits], time_window: {days_back: 30}
 - "Who made commits last week?" → entities: [commits], columns: [author], filters: [committed_at >= 7 days ago]
 - "Commits touching auth.ts" → entities: [commits], filters: [message LIKE '%auth.ts%' OR hash in file_commits]
 - "Who built the auth extension?" → entities: [commits, users], joins: [commits.author = users.github_username], is_cross_domain: true
 - "Which developer made the most commits?" → entities: [commits, users], aggregations: [COUNT(*)], group_by: [author], is_cross_domain: true
 
-Always ensure the plan includes project_id filtering and respects the 30-day default time window.`,
+Always ensure the plan includes project_id filtering. By default, return current state (HEAD) without time restrictions unless the user specifically asks for historical data.`,
   model: MODEL_CONFIG.plannerModel,
   outputType: QueryPlanSchema,
   modelSettings: MODEL_SETTINGS.medium
@@ -98,7 +98,7 @@ QUERY PLANNING STEPS:
 5. Specify joins if needed (interactions → conversations → projects, interactions → users via author)
 6. Add aggregations if needed (COUNT, MAX, MIN, AVG, SUM)
 7. Add GROUP BY if aggregating
-8. Set appropriate time window (default 30 days if not specified)
+8. Set appropriate time window (default to current state/HEAD if not specified, only add time window for historical queries)
 9. Set is_cross_domain=true if involving multiple domains
 10. Explain your reasoning
 
@@ -109,7 +109,7 @@ EXAMPLE QUERIES:
 - "What AI conversations did Sarah have?" → entities: [interactions, users], joins: [interactions.author = users.github_username], is_cross_domain: true
 - "Which developer made the most interactions?" → entities: [interactions, users], aggregations: [COUNT(*)], group_by: [author], is_cross_domain: true
 
-Always ensure the plan includes project_id filtering and respects the 30-day default time window.`,
+Always ensure the plan includes project_id filtering. By default, return current state (HEAD) without time restrictions unless the user specifically asks for historical data.`,
   model: MODEL_CONFIG.plannerModel,
   outputType: QueryPlanSchema,
   modelSettings: MODEL_SETTINGS.medium
@@ -154,7 +154,7 @@ QUERY PLANNING STEPS:
 5. Specify joins if needed (conversations → projects, conversations → interactions)
 6. Add aggregations if needed (COUNT, MAX, MIN, AVG, SUM)
 7. Add GROUP BY if aggregating
-8. Set appropriate time window (default 30 days if not specified)
+8. Set appropriate time window (default to current state/HEAD if not specified, only add time window for historical queries)
 9. Set is_cross_domain=true if involving multiple domains
 10. Explain your reasoning
 
@@ -165,7 +165,7 @@ EXAMPLE QUERIES:
 - "Which conversation had the most AI interactions?" → entities: [conversations, interactions], aggregations: [COUNT(*)], group_by: [conversation_id], is_cross_domain: true
 - "What AI conversations happened during the auth refactor?" → entities: [conversations, interactions], filters: [title LIKE '%auth%' OR prompt_text LIKE '%auth%'], is_cross_domain: true
 
-Always ensure the plan includes project_id filtering and respects the 30-day default time window.`,
+Always ensure the plan includes project_id filtering. By default, return current state (HEAD) without time restrictions unless the user specifically asks for historical data.`,
   model: MODEL_CONFIG.plannerModel,
   outputType: QueryPlanSchema,
   modelSettings: MODEL_SETTINGS.medium
@@ -209,7 +209,7 @@ QUERY PLANNING STEPS:
 5. Specify joins if needed (projects ← commits, projects ← interactions)
 6. Add aggregations if needed (COUNT, MAX, MIN, AVG, SUM)
 7. Add GROUP BY if aggregating
-8. Set appropriate time window (default 30 days if not specified)
+8. Set appropriate time window (default to current state/HEAD if not specified, only add time window for historical queries)
 9. Set is_cross_domain=true if involving multiple domains
 10. Explain your reasoning
 
@@ -266,7 +266,7 @@ QUERY PLANNING STEPS:
 5. Specify joins if needed (users → commits/interactions via author field)
 6. Add aggregations if needed (COUNT, MAX, MIN, AVG, SUM)
 7. Add GROUP BY if aggregating
-8. Set appropriate time window (default 30 days if not specified)
+8. Set appropriate time window (default to current state/HEAD if not specified, only add time window for historical queries)
 9. Set is_cross_domain=true if involving multiple domains
 10. Explain your reasoning
 
@@ -277,7 +277,68 @@ EXAMPLE QUERIES:
 - "Which developer made the most interactions?" → entities: [users, interactions], joins: [users.github_username = interactions.author], aggregations: [COUNT(*)], group_by: [author], is_cross_domain: true
 - "Show me commits by John" → entities: [users, commits], joins: [users.github_username = commits.author], filters: [author = 'John'], is_cross_domain: true
 
-Always ensure the plan includes appropriate project filtering and respects the 30-day default time window.`,
+Always ensure the plan includes appropriate project filtering. By default, return current state (HEAD) without time restrictions unless the user specifically asks for historical data.`,
+  model: MODEL_CONFIG.plannerModel,
+  outputType: QueryPlanSchema,
+  modelSettings: MODEL_SETTINGS.medium
+});
+
+/**
+ * File Planner Agent
+ * 
+ * Plans queries about file changes, file paths, and code modifications.
+ * Includes interaction_diffs, pull_requests, and related entities.
+ */
+export const filePlannerAgent = new Agent({
+  name: "File Query Planner",
+  instructions: `You are a query planner for file-related questions in the Tig Agent SDK. Your role is to transform natural language questions about files, file changes, and code modifications into structured query plans, including cross-domain queries and aggregations.
+
+${ONTOLOGY_TEXT}
+
+FILE-SPECIFIC GUIDELINES:
+- Focus on interaction_diffs, pull_requests, and related entities
+- Support cross-domain queries with interactions, commits, and users for comprehensive file analysis
+- Common file queries: file changes, file paths, code modifications, file history, file context
+- Always include project_id filter for security (through related entities)
+- Use created_at for time-based queries
+- Include file_path and diff_chunks when relevant
+- Consider file extensions and directory structures for filtering
+- Handle case sensitivity and fuzzy matching: use LIKE with % wildcards for flexible matching
+- When searching for components/functions in files, search the file content broadly rather than exact matches
+- If a specific component isn't found, return the file changes anyway to provide context
+
+CROSS-DOMAIN SUPPORT:
+- "Who modified layout.tsx?" → join interaction_diffs with interactions, filter by file_path
+- "What files were changed in the last commit?" → join interaction_diffs with interactions and commits
+- "Show me all changes to auth files" → join interaction_diffs, filter by file_path LIKE '%auth%'
+- "Which files have the most changes?" → join interaction_diffs, aggregate by file_path
+
+AGGREGATION SUPPORT:
+- COUNT: Count file changes by file_path, author, or time period
+- MAX/MIN: Find latest/earliest file changes
+- AVG/SUM: Average/sum numeric values (rare for files)
+
+QUERY PLANNING STEPS:
+1. Identify the main intent (file changes, file history, file context, etc.)
+2. Select appropriate entities (interaction_diffs, interactions, pull_requests, users as needed)
+3. Choose relevant columns (id, file_path, diff_chunks, created_at, interaction_id, author)
+4. Define filters based on the query (file paths, time ranges, authors, file extensions, etc.)
+5. Specify joins if needed (interaction_diffs → interactions → conversations → projects)
+6. Add aggregations if needed (COUNT, MAX, MIN, AVG, SUM)
+7. Add GROUP BY if aggregating
+8. Set appropriate time window (default to current state/HEAD if not specified, only add time window for historical queries)
+9. Set is_cross_domain=true if involving multiple domains
+10. Explain your reasoning
+
+EXAMPLE QUERIES:
+- "Show me changes to layout.tsx" → entities: [interaction_diffs, interactions], filters: [file_path LIKE '%layout.tsx%']
+- "What files were modified recently?" → entities: [interaction_diffs], columns: [file_path, created_at], time_window: {days_back: 7}
+- "Who changed the auth files?" → entities: [interaction_diffs, interactions, users], joins: [interaction_diffs.interaction_id = interactions.id, interactions.author = users.github_username], filters: [file_path LIKE '%auth%'], is_cross_domain: true
+- "Which files have the most changes?" → entities: [interaction_diffs], aggregations: [COUNT(*)], group_by: [file_path]
+- "Show me the context around rootlayout from layout.tsx" → entities: [interaction_diffs, interactions], filters: [file_path LIKE '%layout.tsx%'], columns: [file_path, diff_chunks, prompt_text, response_text]
+- "Give me context about RootLayout from layout.tsx" → entities: [interaction_diffs, interactions], filters: [file_path LIKE '%layout.tsx%'], columns: [file_path, diff_chunks, prompt_text, response_text] (search in file content, not just exact matches)
+
+Always ensure the plan includes appropriate project filtering. By default, return current state (HEAD) without time restrictions unless the user specifically asks for historical data.`,
   model: MODEL_CONFIG.plannerModel,
   outputType: QueryPlanSchema,
   modelSettings: MODEL_SETTINGS.medium

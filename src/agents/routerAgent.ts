@@ -9,7 +9,7 @@ import { MODEL_CONFIG, MODEL_SETTINGS } from "../config.js";
  * - commit: Queries about code commits, changes, authors
  * - interaction: Queries about AI interactions, prompts/responses
  * - conversation: Queries about conversation threads, discussions
- * - file: Queries about specific files (not implemented in v1.0)
+ * - file: Queries about specific files, file changes, and code modifications
  * - project: Queries about repositories, projects
  * - user: Queries about developers, contributors
  * - other: Queries that don't fit the above categories
@@ -29,6 +29,9 @@ DOMAINS:
 • conversation — Queries about conversation threads, discussions, and chat sessions.
   Examples: "What were the main discussions about rate limiting?", "Show me conversations about the API refactor", "Which conversations had the most activity?", "What topics were discussed this week?"
 
+• file — Queries about specific files, file changes, and code modifications.
+  Examples: "Show me changes to layout.tsx", "What files were modified recently?", "Who changed the auth files?", "Give me context about rootlayout from layout.tsx", "Which files have the most changes?", "Show me the diff for app/page.tsx"
+
 • project — Queries about repositories, projects, and project-level information.
   Examples: "Which repos have the most activity?", "Show me all projects", "What's the status of the main project?", "Which project has the most commits?"
 
@@ -46,6 +49,8 @@ Some queries span multiple domains and require joins between tables:
 • "Show me commits by John" → commit + user (via author field)
 • "What AI conversations did Sarah have?" → user + interaction (via author field)
 • "Which developer made the most interactions?" → user + interaction (with aggregation)
+• "Who modified layout.tsx?" → file + user (via interaction author field)
+• "What files were changed in the last commit?" → file + commit (via interaction context)
 
 CLASSIFICATION RULES:
 - For single-domain queries: Choose the most specific domain that matches the query intent
@@ -53,6 +58,7 @@ CLASSIFICATION RULES:
 - If the query is asking about commits, changes, or code history → commit
 - If the query is asking about AI prompts, responses, or AI conversations → interaction  
 - If the query is asking about discussion threads or chat sessions → conversation
+- If the query is asking about specific files, file changes, or file content → file
 - If the query is asking about repositories or projects → project
 - If the query is asking about people or developers → user
 - If the query is too general or doesn't fit → other

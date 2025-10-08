@@ -25,7 +25,8 @@ const DANGEROUS_KEYWORDS = [
 const MAX_ROWS = 200;
 
 /**
- * Default time window in days
+ * Default time window in days (only applied when explicitly requested)
+ * By default, queries should return current state (HEAD) without time restrictions
  */
 const DEFAULT_TIME_WINDOW_DAYS = 30;
 
@@ -146,9 +147,17 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
   
   const resolveParameter = (value: any): any => {
     if (typeof value === 'string') {
-      if (value === ':project_id' || value === '${project_id}' || value === '{project_id}') return projectId;
-      if (value === ':start_date' || value === '${start_date}' || value === '{start_date}') return thirtyDaysAgo.toISOString();
-      if (value === ':end_date' || value === '${end_date}' || value === '{end_date}') return now.toISOString();
+      if (value === ':project_id' || value === '${project_id}' || value === '{project_id}' || value === '{{project_id}}' || value === '$project_id') return projectId;
+      if (value === ':start_date' || value === '${start_date}' || value === '{start_date}' || value === '{{start_date}}' || value === '$start_date') return thirtyDaysAgo.toISOString();
+      if (value === ':end_date' || value === '${end_date}' || value === '{end_date}' || value === '{{end_date}}' || value === '$end_date') return now.toISOString();
+      
+      // Handle dynamic time expressions like "${now - 90 days}"
+      const timeMatch = value.match(/\$\{now\s*-\s*(\d+)\s*days?\}/i);
+      if (timeMatch) {
+        const daysBack = parseInt(timeMatch[1]);
+        const pastDate = new Date(now.getTime() - (daysBack * 24 * 60 * 60 * 1000));
+        return pastDate.toISOString();
+      }
     }
     return value;
   };
@@ -237,8 +246,8 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
   // Always include project_id filter
   if (mainEntity === 'projects') {
     whereConditions.push(`${mainEntity}.id = '${projectId}'`);
-  } else if (mainEntity === 'users') {
-    // Users table doesn't have project_id, so we don't add automatic project join
+  } else if (mainEntity === 'users' || mainEntity === 'interaction_diffs') {
+    // Users and interaction_diffs tables don't have project_id, so we don't add automatic project join
     // Project filtering will be handled through joined entities
   } else {
     // For other entities, join to projects to filter by project_id
@@ -249,9 +258,9 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
     whereConditions.push(`projects.id = '${projectId}'`);
   }
   
-  // Special handling for users table - it doesn't have project_id directly
-  if (mainEntity === 'users') {
-    // For users table, we need to filter through the joined entities
+  // Special handling for users, interaction_diffs, and interactions tables - they don't have project_id directly
+  if (mainEntity === 'users' || mainEntity === 'interaction_diffs' || mainEntity === 'interactions') {
+    // For these tables, we need to filter through the joined entities
     // Check if we have joins that can provide project context
     const hasProjectContext = plan.joins.some(j => 
       j.right_table === 'commits' || j.right_table === 'interactions' || j.right_table === 'conversations'
@@ -263,19 +272,36 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
         j.right_table === 'commits' || j.right_table === 'interactions' || j.right_table === 'conversations'
       )?.right_table;
       
-      if (projectEntity && projectEntity !== 'projects') {
+      if (projectEntity === 'commits' || projectEntity === 'conversations') {
+        // These entities have direct project_id
         whereConditions.push(`${projectEntity}.project_id = '${projectId}'`);
+      } else if (projectEntity === 'interactions') {
+        // Interactions don't have direct project_id, need to go through conversations
+        if (plan.joins.some(j => j.right_table === 'conversations')) {
+          whereConditions.push(`conversations.project_id = '${projectId}'`);
+        } else {
+          // Add the missing join to conversations
+          joins.push(`INNER JOIN conversations ON interactions.conversation_id = conversations.id`);
+          tablesInFrom.add('conversations');
+          whereConditions.push(`conversations.project_id = '${projectId}'`);
+        }
       }
     } else {
-      // If no project context available, we can't filter by project
+      // If no project context available, add conversations join for interactions
+      if (mainEntity === 'interactions') {
+        joins.push(`INNER JOIN conversations ON interactions.conversation_id = conversations.id`);
+        tablesInFrom.add('conversations');
+        whereConditions.push(`conversations.project_id = '${projectId}'`);
+      }
+      // For other entities without project context, we can't filter by project
       // This should be handled by the planner to ensure proper joins
     }
   }
   
-  // Add time window filter
+  // Add time window filter (only if explicitly requested)
   const timeWindow = plan.time_window;
-  if (timeWindow.days_back) {
-    const daysBack = timeWindow.days_back || DEFAULT_TIME_WINDOW_DAYS;
+  if (timeWindow.days_back && timeWindow.days_back > 0) {
+    const daysBack = timeWindow.days_back;
     const timeColumn = getTimeColumn(mainEntity);
     if (timeColumn) {
       whereConditions.push(`${mainEntity}.${timeColumn} >= NOW() - INTERVAL '${daysBack} days'`);
@@ -301,7 +327,14 @@ function buildSafeSQL(plan: QueryPlan, projectId: string): string {
         }
         break;
       case 'LIKE':
-        whereConditions.push(`${table}.${column} LIKE '${resolvedValue}'`);
+        // Special handling for JSONB columns
+        if (column === 'diff_chunks') {
+          // For JSONB columns, use case-insensitive text search
+          whereConditions.push(`LOWER(${table}.${column}::text) LIKE LOWER('${resolvedValue}')`);
+        } else {
+          // Use case-insensitive LIKE for better matching
+          whereConditions.push(`LOWER(${table}.${column}) LIKE LOWER('${resolvedValue}')`);
+        }
         break;
       case 'IN':
         if (Array.isArray(resolvedValue)) {
@@ -365,7 +398,9 @@ function getTimeColumn(entity: string): string | null {
     interactions: 'created_at',
     conversations: 'created_at',
     projects: 'created_at',
-    users: 'created_at'
+    users: 'created_at',
+    interaction_diffs: 'created_at',
+    pull_requests: 'created_at'
   };
   
   return timeColumns[entity] || null;

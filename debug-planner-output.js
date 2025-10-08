@@ -1,35 +1,29 @@
 import { Runner } from "@openai/agents";
-import { routerAgent } from "./dist/agents/routerAgent.js";
-import { commitPlannerAgent } from "./dist/agents/plannerAgents.js";
-import dotenv from 'dotenv';
+import { commitPlannerAgent } from './dist/agents/plannerAgents.js';
 
-dotenv.config();
-
-async function debugPlannerOutput() {
-  const runner = new Runner({
-    traceMetadata: {
-      __trace_source__: "debug-planner-output",
-      workflow_id: "debug-planner",
-      project_id: "bfd5c464-bd03-4748-8ea1-c79b38a155ce"
-    }
-  });
-
+async function debugPlanner() {
+  const runner = new Runner();
+  
   const conversationHistory = [
-    { role: "user", content: "Show me recent commits" }
+    {
+      role: "user",
+      content: "give me a summary of the context from the last commit"
+    }
   ];
 
   try {
-    // Run router
-    const routerResult = await runner.run(routerAgent, [...conversationHistory]);
-    conversationHistory.push(...routerResult.newItems.map((item) => item.rawItem));
+    console.log("Running planner agent...");
+    const result = await runner.run(commitPlannerAgent, conversationHistory);
     
-    // Run planner
-    const plannerResult = await runner.run(commitPlannerAgent, [...conversationHistory]);
-    console.log('Planner output:');
-    console.log(JSON.stringify(plannerResult.finalOutput, null, 2));
+    if (result.finalOutput) {
+      console.log("Query plan:");
+      console.log(JSON.stringify(result.finalOutput, null, 2));
+    } else {
+      console.log("No final output from planner");
+    }
   } catch (error) {
-    console.error('Error:', error);
+    console.error("Error:", error);
   }
 }
 
-debugPlannerOutput();
+debugPlanner();
