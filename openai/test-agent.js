@@ -1,8 +1,8 @@
 import { runTigAgent, closeConnections } from './dist/index.js';
 import dotenv from 'dotenv';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from parent directory
+dotenv.config({ path: '../.env' });
 
 /**
  * Test script for TigAgent functionality

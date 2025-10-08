@@ -2,8 +2,8 @@ import { Runner } from "@openai/agents";
 import { routerAgent } from "./dist/agents/routerAgent.js";
 import dotenv from 'dotenv';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from parent directory
+dotenv.config({ path: '../.env' });
 
 /**
  * Test just the router agent to see if our fixes work

@@ -2,8 +2,8 @@ import { runGuardrails } from "@openai/guardrails";
 import { client, guardrailsConfig, guardrailsContext } from "./dist/config.js";
 import dotenv from 'dotenv';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from parent directory
+dotenv.config({ path: '../.env' });
 
 /**
  * Debug script specifically for guardrails request body

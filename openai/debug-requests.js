@@ -4,8 +4,8 @@ import { client, guardrailsConfig, guardrailsContext } from "./dist/config.js";
 import { routerAgent } from "./dist/agents/routerAgent.js";
 import dotenv from 'dotenv';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from parent directory
+dotenv.config({ path: '../.env' });
 
 /**
  * Debug script to capture the exact request bodies being sent

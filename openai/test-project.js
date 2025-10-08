@@ -2,7 +2,8 @@ import { runWorkflow } from './dist/workflow.js';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 
-dotenv.config();
+// Load environment variables from parent directory
+dotenv.config({ path: '../.env' });
 
 async function testProject(projectId, query) {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });

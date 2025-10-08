@@ -1,0 +1,36 @@
+{
+  "name": "tigagent-anthropic",
+  "version": "1.0.0",
+  "description": "TigAgent implementation using Anthropic Claude API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node test-suite.js",
+    "test:quick": "node quick-test.js",
+    "test:critical": "node test-suite.js --critical",
+    "test:verbose": "node test-suite.js --verbose",
+    "validate": "node quick-test.js",
+    "example": "node example.js"
+  },
+  "keywords": [
+    "anthropic",
+    "claude",
+    "agent",
+    "tig",
+    "workflow"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.65.0",
+    "dotenv": "^16.3.1",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/pg": "^8.10.9",
+    "typescript": "^5.3.3"
+  }
+}

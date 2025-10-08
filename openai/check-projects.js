@@ -1,7 +1,8 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 
-dotenv.config();
+// Load environment variables from parent directory
+dotenv.config({ path: '../.env' });
 
 async function checkProjects() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });

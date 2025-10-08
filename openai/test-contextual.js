@@ -2,8 +2,8 @@ import { runContextualWorkflow } from './dist/workflow.js';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from parent directory
+dotenv.config({ path: '../.env' });
 
 async function testContextualWorkflow(projectId, query) {
   console.log(`Testing contextual workflow for project: ${projectId}`);

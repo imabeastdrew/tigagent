@@ -3,8 +3,8 @@ import dotenv from "dotenv";
 import { runWorkflow } from "./workflow.js";
 import { WorkflowInput, AgentResponse } from "./types.js";
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from parent directory
+dotenv.config({ path: '../.env' });
 
 /**
  * Initialize database connection pool

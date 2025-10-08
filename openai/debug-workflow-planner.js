@@ -4,7 +4,8 @@ import { commitPlannerAgent } from "./dist/agents/plannerAgents.js";
 import { validateAndBuildSQL } from "./dist/validator.js";
 import dotenv from 'dotenv';
 
-dotenv.config();
+// Load environment variables from parent directory
+dotenv.config({ path: '../.env' });
 
 async function debugWorkflowPlanner() {
   const runner = new Runner({
