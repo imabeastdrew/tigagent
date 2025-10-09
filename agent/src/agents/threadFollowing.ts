@@ -36,6 +36,13 @@ export async function threadFollowingAgent(
     console.log('[ThreadFollowing] Tracing commits to interactions...');
     const commitContext = await queryHelpers.traceCommitsToInteractions(seeds.commit_hashes);
     
+    // Debug: Show commit author breakdown
+    const commitAuthorBreakdown: { [key: string]: number } = {};
+    commitContext.forEach((c: any) => {
+      commitAuthorBreakdown[c.author] = (commitAuthorBreakdown[c.author] || 0) + 1;
+    });
+    console.log('[ThreadFollowing] Commit authors retrieved:', commitAuthorBreakdown);
+    
     // 4. Get file change history
     console.log('[ThreadFollowing] Building file histories...');
     const fileHistory = await queryHelpers.getFileHistory(seeds.file_paths);

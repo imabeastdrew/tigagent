@@ -52,22 +52,60 @@ export async function explore(
     console.log('-'.repeat(80));
     const parallelStart = Date.now();
 
+    // Track individual agent timings
+    const agentTimings: { [key: string]: number } = {};
+
     await Promise.all([
-      threadFollowingAgent(stream, actualProjectId)
-        .then(() => console.log('✓ Thread Following complete'))
-        .catch(err => console.error('✗ Thread Following failed:', err.message)),
+      (async () => {
+        const start = Date.now();
+        try {
+          await threadFollowingAgent(stream, actualProjectId);
+          agentTimings.threadFollowing = Date.now() - start;
+          console.log(`✓ Thread Following complete (${(agentTimings.threadFollowing / 1000).toFixed(1)}s)`);
+        } catch (err: any) {
+          agentTimings.threadFollowing = Date.now() - start;
+          console.error(`✗ Thread Following failed after ${(agentTimings.threadFollowing / 1000).toFixed(1)}s:`, err.message);
+        }
+      })(),
       
-      knowledgeMiningAgent(stream, actualProjectId)
-        .then(() => console.log('✓ Knowledge Mining complete'))
-        .catch(err => console.error('✗ Knowledge Mining failed:', err.message)),
+      (async () => {
+        const start = Date.now();
+        try {
+          await knowledgeMiningAgent(stream, actualProjectId);
+          agentTimings.knowledgeMining = Date.now() - start;
+          console.log(`✓ Knowledge Mining complete (${(agentTimings.knowledgeMining / 1000).toFixed(1)}s)`);
+        } catch (err: any) {
+          agentTimings.knowledgeMining = Date.now() - start;
+          console.error(`✗ Knowledge Mining failed after ${(agentTimings.knowledgeMining / 1000).toFixed(1)}s:`, err.message);
+        }
+      })(),
       
-      temporalContextAgent(stream, actualProjectId)
-        .then(() => console.log('✓ Temporal Context complete'))
-        .catch(err => console.error('✗ Temporal Context failed:', err.message))
+      (async () => {
+        const start = Date.now();
+        try {
+          await temporalContextAgent(stream, actualProjectId);
+          agentTimings.temporalContext = Date.now() - start;
+          console.log(`✓ Temporal Context complete (${(agentTimings.temporalContext / 1000).toFixed(1)}s)`);
+        } catch (err: any) {
+          agentTimings.temporalContext = Date.now() - start;
+          console.error(`✗ Temporal Context failed after ${(agentTimings.temporalContext / 1000).toFixed(1)}s:`, err.message);
+        }
+      })()
     ]);
 
     const parallelTime = Date.now() - parallelStart;
-    console.log(`\n✓ Parallel phase complete (${(parallelTime / 1000).toFixed(1)}s)\n`);
+    
+    // Find the slowest agent (bottleneck)
+    const slowestAgent = Object.entries(agentTimings).reduce((prev, curr) => 
+      curr[1] > prev[1] ? curr : prev
+    );
+    
+    console.log(`\n✓ Parallel phase complete (${(parallelTime / 1000).toFixed(1)}s)`);
+    console.log(`  Agent timings:`);
+    console.log(`    - Thread Following: ${(agentTimings.threadFollowing / 1000).toFixed(1)}s`);
+    console.log(`    - Knowledge Mining: ${(agentTimings.knowledgeMining / 1000).toFixed(1)}s`);
+    console.log(`    - Temporal Context: ${(agentTimings.temporalContext / 1000).toFixed(1)}s`);
+    console.log(`  Bottleneck: ${slowestAgent[0]} (${(slowestAgent[1] / 1000).toFixed(1)}s)\n`);
 
     // PHASE 3: Synthesis (sequential - needs all findings)
     console.log('PHASE 3: SYNTHESIS');

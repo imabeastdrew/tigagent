@@ -16,19 +16,27 @@ export async function knowledgeMiningAgent(
   projectId: string
 ): Promise<void> {
   console.log(`[KnowledgeMining] Starting knowledge extraction...`);
+  const agentStart = Date.now();
 
   try {
     // 1. Read Discovery event from stream
+    const streamReadStart = Date.now();
     const events = await stream.read();
     const discoveryEvent = events.find(e => e.agent === 'discovery' && e.action === 'find_seeds');
     
     if (!discoveryEvent) {
       throw new Error('No discovery event found in stream');
     }
+    
+    const streamReadTime = Date.now() - streamReadStart;
+    console.log(`[KnowledgeMining] Stream read completed in ${(streamReadTime / 1000).toFixed(2)}s`);
 
     // 2. Get full interaction text from storage
     console.log('[KnowledgeMining] Retrieving interaction data...');
+    const dataFetchStart = Date.now();
     const semanticResults = await stream.get(discoveryEvent.storage!.semantic_results);
+    const dataFetchTime = Date.now() - dataFetchStart;
+    console.log(`[KnowledgeMining] Data fetch completed in ${(dataFetchTime / 1000).toFixed(2)}s`);
     
     if (!semanticResults || semanticResults.length === 0) {
       console.log('[KnowledgeMining] No interactions to analyze');
@@ -62,6 +70,7 @@ export async function knowledgeMiningAgent(
     console.log(`[KnowledgeMining] Analyzing ${interactionsToAnalyze.length} interactions with Claude...`);
 
     // 4. Use Claude to extract knowledge
+    const apiCallStart = Date.now();
     const client = createAnthropicClient();
     
     const analysisResponse = await client.messages.create({
@@ -113,8 +122,12 @@ Provide structured output in JSON format:
 Focus on actionable insights that would help someone understand WHY code exists the way it does.`
       }]
     });
+    
+    const apiCallTime = Date.now() - apiCallStart;
+    console.log(`[KnowledgeMining] Claude API call completed in ${(apiCallTime / 1000).toFixed(1)}s`);
 
     // 5. Parse the analysis
+    const parseStart = Date.now();
     let analysis: KnowledgeAnalysis;
     try {
       const textContent = analysisResponse.content.find(block => block.type === 'text');
@@ -139,6 +152,9 @@ Focus on actionable insights that would help someone understand WHY code exists 
         patterns: []
       };
     }
+    
+    const parseTime = Date.now() - parseStart;
+    console.log(`[KnowledgeMining] Response parsing completed in ${(parseTime / 1000).toFixed(2)}s`);
 
     // 6. Create output summary
     const output: KnowledgeMiningOutput = {
@@ -154,6 +170,7 @@ Focus on actionable insights that would help someone understand WHY code exists 
     console.log(`[KnowledgeMining] Results:`, output);
 
     // 7. Store full analysis in stream storage
+    const streamWriteStart = Date.now();
     const analysisKey = await stream.put('knowledge_analysis', analysis);
 
     // 8. Write findings to stream
@@ -167,7 +184,12 @@ Focus on actionable insights that would help someone understand WHY code exists 
       },
       references: [discoveryEvent.event_id!]
     });
-
+    
+    const streamWriteTime = Date.now() - streamWriteStart;
+    console.log(`[KnowledgeMining] Stream write completed in ${(streamWriteTime / 1000).toFixed(2)}s`);
+    
+    const totalTime = Date.now() - agentStart;
+    console.log(`[KnowledgeMining] Total agent time: ${(totalTime / 1000).toFixed(1)}s (API: ${(apiCallTime / 1000).toFixed(1)}s, Parse: ${(parseTime / 1000).toFixed(2)}s, Stream: ${(streamWriteTime / 1000).toFixed(2)}s)`);
     console.log('[KnowledgeMining] Analysis written to stream');
   } catch (error) {
     console.error('[KnowledgeMining] Error:', error);

@@ -56,16 +56,54 @@ export async function discoveryAgent(
     const file_paths = [...new Set(relatedData.map(r => r.file_path).filter(Boolean))];
     const commitAuthors = [...new Set(relatedData.map(r => r.commit_author).filter(Boolean))];
     
-    // Combine all people
+    // Combine all people and deduplicate
     people.push(...commitAuthors);
+    const uniquePeople = [...new Set(people)];
+    
+    // 4. IMPORTANT: Also fetch commits directly by people found in semantic search
+    // This ensures we get commits from people mentioned in conversations even if
+    // those commits aren't linked to the top semantic search results
+    if (uniquePeople.length > 0) {
+      console.log(`[Discovery] Fetching commits by identified people: ${uniquePeople.join(', ')}`);
+      const authorCommits = await executeSqlQuery(
+        `
+        SELECT DISTINCT
+          c.hash as commit_hash,
+          c.author as commit_author,
+          c.message as commit_message,
+          c.committed_at as commit_timestamp
+        FROM commits c
+        WHERE c.project_id = $1
+          AND c.author = ANY($2)
+        ORDER BY c.committed_at DESC
+        LIMIT 50
+        `,
+        [projectId, uniquePeople]
+      );
+      
+      console.log(`[Discovery] Found ${authorCommits.length} commits by identified authors`);
+      
+      // Debug: Show author breakdown
+      const authorBreakdown: { [key: string]: number } = {};
+      authorCommits.forEach(c => {
+        authorBreakdown[c.commit_author] = (authorBreakdown[c.commit_author] || 0) + 1;
+      });
+      console.log(`[Discovery] Author breakdown:`, authorBreakdown);
+      
+      // Merge with existing commit data
+      const newCommitHashes = authorCommits.map(r => r.commit_hash).filter(Boolean);
+      const beforeMerge = commit_hashes.length;
+      commit_hashes.push(...newCommitHashes.filter(h => !commit_hashes.includes(h)));
+      console.log(`[Discovery] Added ${commit_hashes.length - beforeMerge} new commit hashes from author query`);
+    }
 
-    // 4. Create output summary
+    // 5. Create output summary
     const output: DiscoveryOutput = {
       interaction_ids,
       conversation_ids,
       commit_hashes,
       file_paths,
-      people,
+      people: uniquePeople,
       counts: {
         interactions: interaction_ids.length,
         conversations: conversation_ids.length,
@@ -75,12 +113,13 @@ export async function discoveryAgent(
     };
 
     console.log(`[Discovery] Found:`, output.counts);
+    console.log(`[Discovery] Commit hashes collected:`, commit_hashes.length);
 
-    // 5. Store full semantic search results in stream storage
+    // 6. Store full semantic search results in stream storage
     const semanticStorageKey = await stream.put('semantic_results', semanticResults);
     const relatedDataStorageKey = await stream.put('related_data', relatedData);
 
-    // 6. Write seed event to stream (summary only, not full data)
+    // 7. Write seed event to stream (summary only, not full data)
     await stream.append({
       agent: 'discovery',
       phase: 'discovery',

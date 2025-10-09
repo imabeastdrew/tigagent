@@ -77,7 +77,13 @@ export async function synthesisAgent(
       } : null,
       commits: commitContext ? {
         count: commitContext.length,
-        sample: commitContext.slice(0, 5)
+        // Author breakdown for context
+        authorBreakdown: commitContext.reduce((acc: any, commit: any) => {
+          acc[commit.author] = (acc[commit.author] || 0) + 1;
+          return acc;
+        }, {}),
+        // Sample commits (stratified by author if possible)
+        sample: commitContext.slice(0, 15)
       } : null,
       knowledge: knowledgeAnalysis,
       timeline: temporal?.output || null
