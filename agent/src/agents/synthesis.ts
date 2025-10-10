@@ -75,16 +75,49 @@ export async function synthesisAgent(
         count: conversationThreads.length,
         sample: conversationThreads.slice(0, 3)
       } : null,
-      commits: commitContext ? {
-        count: commitContext.length,
-        // Author breakdown for context
-        authorBreakdown: commitContext.reduce((acc: any, commit: any) => {
+      commits: commitContext ? (() => {
+        // Calculate author breakdown
+        const authorBreakdown = commitContext.reduce((acc: any, commit: any) => {
           acc[commit.author] = (acc[commit.author] || 0) + 1;
           return acc;
-        }, {}),
-        // Sample commits (stratified by author if possible)
-        sample: commitContext.slice(0, 15)
-      } : null,
+        }, {});
+        
+        // Stratified sampling: get most recent commits from each author
+        // This ensures we don't miss important commits from less active contributors
+        const commitsByAuthor: { [key: string]: any[] } = {};
+        commitContext.forEach((commit: any) => {
+          if (!commitsByAuthor[commit.author]) {
+            commitsByAuthor[commit.author] = [];
+          }
+          commitsByAuthor[commit.author].push(commit);
+        });
+        
+        // Take top N from each author (proportional to their contribution, min 3 per author)
+        const authors = Object.keys(commitsByAuthor);
+        const totalSampleSize = 20;
+        const minPerAuthor = Math.min(3, Math.floor(totalSampleSize / authors.length));
+        
+        let stratifiedSample: any[] = [];
+        authors.forEach(author => {
+          const authorCommits = commitsByAuthor[author];
+          const sampleSize = Math.max(minPerAuthor, Math.floor((authorCommits.length / commitContext.length) * totalSampleSize));
+          stratifiedSample.push(...authorCommits.slice(0, sampleSize));
+        });
+        
+        // If we still have room, add more from the most recent overall
+        if (stratifiedSample.length < totalSampleSize) {
+          const remaining = commitContext
+            .filter((c: any) => !stratifiedSample.some((s: any) => s.hash === c.hash))
+            .slice(0, totalSampleSize - stratifiedSample.length);
+          stratifiedSample.push(...remaining);
+        }
+        
+        return {
+          count: commitContext.length,
+          authorBreakdown,
+          sample: stratifiedSample
+        };
+      })() : null,
       knowledge: knowledgeAnalysis,
       timeline: temporal?.output || null
     };

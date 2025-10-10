@@ -106,6 +106,7 @@ export const queryHelpers = {
       LEFT JOIN interactions i ON ci.interaction_id = i.id
       WHERE c.hash = ANY($1)
       GROUP BY c.id
+      ORDER BY c.committed_at DESC
       `,
       [commitHashes]
     );

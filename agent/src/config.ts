@@ -36,7 +36,9 @@ export const AGENT_MODELS = {
   threadFollowing: 'claude-sonnet-4-20250514',     // Better reasoning for tracing
   knowledgeMining: 'claude-sonnet-4-20250514',     // Better reasoning for analysis
   temporalContext: 'claude-3-5-haiku-20241022',    // Fast for timeline analysis
-  synthesis: 'claude-sonnet-4-5-20250929'          // Best for final synthesis
+  synthesis: 'claude-sonnet-4-5-20250929',         // Best for final synthesis
+  judge: 'claude-3-5-haiku-20241022',              // Fast for scoring interactions
+  worker: 'claude-3-5-haiku-20241022'              // Fast for investigation
 };
 
 /**

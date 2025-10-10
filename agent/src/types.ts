@@ -4,8 +4,8 @@
 
 export interface ExplorationEvent {
   event_id?: string;
-  agent: 'discovery' | 'thread_following' | 'knowledge_mining' | 'temporal_context' | 'synthesis';
-  phase: 'discovery' | 'parallel' | 'synthesis';
+  agent: string; // Changed to string to support dynamic agent names (worker_1, judge_2, etc.)
+  phase: 'discovery' | 'parallel' | 'synthesis' | 'search' | 'judging' | 'investigation'; // Support both old and new phases during migration
   action: string;
   output: Record<string, any>;
   storage?: Record<string, string>;
@@ -143,5 +143,104 @@ export interface TimelineData {
     changeFrequency: number;
     urgency: 'low' | 'moderate' | 'high';
   };
+}
+
+// ============================================================================
+// New Iterative Architecture Types
+// ============================================================================
+
+/**
+ * Search request sent to Discovery service
+ */
+export interface SearchRequest {
+  query: string;
+  iteration: number;
+  source: string; // event_id that triggered this search, or 'user_query' for initial
+  lead_type: 'initial' | 'commit_reference' | 'entity_reference' | 'person_reference' | 
+             'date_reference' | 'file_reference' | 'conversation_reference';
+  context?: string;
+  filters?: {
+    commit_hash?: string;
+    author?: string;
+    file_path?: string;
+    date?: string;
+  };
+}
+
+/**
+ * Lead discovered by an investigator (something to search for)
+ */
+export interface Lead {
+  type: 'commit' | 'entity' | 'person' | 'temporal' | 'conversation' | 'file';
+  value: string; // The specific value (commit hash, entity name, person name, etc.)
+  search_query: string; // What to search for in Discovery
+  reason: string; // Why we need to follow this lead
+  priority: 'high' | 'medium' | 'low';
+  context?: string; // Additional context about the lead
+}
+
+/**
+ * Finding extracted by an investigator
+ */
+export interface Finding {
+  type: 'decision' | 'problem' | 'solution' | 'technical_detail' | 'context';
+  summary: string; // One sentence summary
+  details: string; // Full explanation with quotes
+  entities: string[]; // Entities mentioned (SessionManager, auth, etc.)
+  relevance_to_query: string; // How this helps answer the query
+  interaction_id: string; // Source interaction
+  author: string;
+  timestamp: string;
+  confidence: number; // 0-1 scale
+}
+
+/**
+ * Score from a judge agent
+ */
+export interface JudgeScore {
+  interaction_id: string;
+  score: number; // 0-10
+  reason: string; // Why this score
+}
+
+/**
+ * Work item in investigation queue
+ */
+export interface WorkItem {
+  interaction_id: string;
+  conversation_id: string;
+  priority: number; // Score from judge
+  source: string; // 'initial_embedding' or 'discovered_reference'
+  context?: string; // Why this was added to queue
+  claimed?: boolean;
+  claimed_by?: string;
+  iteration: number;
+}
+
+/**
+ * Analysis result from investigator
+ */
+export interface InvestigationResult {
+  findings: Finding[];
+  leads: Lead[];
+  completeness: {
+    score: number; // 0-1, how complete is our understanding
+    missing: string[]; // What key questions remain
+  };
+}
+
+/**
+ * Interaction data from semantic search
+ */
+export interface Interaction {
+  id: string;
+  conversation_id: string;
+  prompt_text: string;
+  response_text: string;
+  author: string;
+  prompt_ts: string;
+  conversation_title: string;
+  platform: string;
+  similarity?: number;
 }
 
