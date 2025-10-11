@@ -1,0 +1,33 @@
+{
+  "name": "tigagent-agentv2",
+  "version": "1.0.0",
+  "description": "Agent v2 - Next-generation intelligent agent using SQL-driven discovery",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node run-agentv2.js",
+    "start": "node dist/run-agentv2.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.1",
+    "dotenv": "^17.2.3",
+    "pg": "^8.16.3",
+    "voyageai": "^0.0.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.10.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "sql",
+    "database",
+    "anthropic",
+    "claude"
+  ],
+  "author": "TigAgent Team",
+  "license": "MIT"
+}
